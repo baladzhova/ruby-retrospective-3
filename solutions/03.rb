@@ -1,108 +1,28 @@
 module Graphics
-  module Renderers
-    class Ascii
-      def self.visualize(canvas)
-        (canvas.send :canvas).map(&:join).join "\n"
-      end
+  module Figure
+    def eql?(other)
+      variables == other.variables
     end
 
-    class Html
-      HTML_BEGINNING = "<!DOCTYPE html>
-    <html>
-    <head>
-      <title>Rendered Canvas</title>
-      <style type=\"text/css\">
-        .canvas {
-          font-size: 1px;
-          line-height: 1px;
-        }
-        .canvas * {
-          display: inline-block;
-          width: 10px;
-          height: 10px;
-          border-radius: 5px;
-        }
-        .canvas i {
-          background-color: #eee;
-        }
-        .canvas b {
-          background-color: #333;
-        }
-      </style>
-    </head>
-    <body>
-      <div class=\"canvas\">\n"
-      HTML_ENDING = "    </div>
-    </body>
-    </html>"
+    alias == eql?
 
-      def self.visualize(canvas)
-        html = (canvas.send :canvas).map(&:join).join "<br>\n"
-        html.gsub!('@', "<b></b>").gsub!('-', "<i></i>")
-        html.insert(0, HTML_BEGINNING).concat('\n' + HTML_ENDING)
-      end
-    end
-  end
-
-  class Canvas
-    include Renderers
-    attr_reader :width, :height
-
-    def initialize(width, height)
-      @width = width
-      @height = height
-      @canvas = Array.new(width) { Array.new(height, '-') }
+    def hash
+      variables.hash
     end
 
-    def set_pixel(width, height)
-      @canvas[height][width] = '@'
+    def variables
+      instance_variables.map { |variable| instance_variable_get(variable) }
     end
-
-    def pixel_at?(width, height)
-      @canvas[height][width] == '@'
-    end
-
-    def draw(figure)
-      figure.draw self
-    end
-
-    def render_as(renderer)
-      renderer.visualize self
-    end
-
-    private
-    attr_reader :canvas
   end
 
   class Point
+    include Figure
     include Comparable
     attr_reader :x, :y
 
     def initialize(x, y)
       @x = x
       @y = y
-    end
-
-    def ==(other)
-      @x == other.x and @y == other.y
-    end
-
-    def eql?(other)
-      self == other
-    end
-
-    def hash
-      (@x.to_s + @y.to_s).hash
-    end
-
-    def <(other)
-      if @x == other.x
-        @y < other.y
-      elsif @x < other.x
-        true
-      else
-        false
-      end
     end
 
     def <=>(other)
@@ -118,201 +38,232 @@ module Graphics
     end
   end
 
-  module BresenhamAlgorithm
-    def bresenham(left, right)
-      left, right, slope = adjust_points left, right
-      characteristics = set_characteristics left, right
-      compute_points left, right, slope, characteristics
-    end
-
-    private
-
-    def adjust_points(left, right)
-      slope = (left.y - right.y).abs > (left.x - right.x).abs
-
-      if slope
-        [Point.new(left.y, left.x), Point.new(right.y, right.x), slope]
-      else
-        [left, right, slope]
-      end
-    end
-
-    def set_characteristics(left, right, characteristics = {})
-      characteristics[:dx] = right.x - left.x
-      characteristics[:dy] = (left.y - right.y).abs
-
-      characteristics[:error] = (characteristics[:dx] / 2).to_i
-
-      characteristics[:y_step] = left.y < right.y ? 1 : -1
-      characteristics[:y] = left.y
-
-      characteristics
-    end
-
-    def compute_points(left, right, slope, characteristics)
-      points = []
-
-      left.x.upto right.x do |x|
-        y = characteristics[:y]
-        slope ? points << Point.new(y, x) : points << Point.new(x, y)
-
-        compute_error characteristics
-      end
-
-      points
-    end
-
-    def compute_error(characteristics)
-      characteristics[:error] -= characteristics[:dy]
-
-      if characteristics[:error] <= 0
-        characteristics[:y] += characteristics[:y_step]
-        characteristics[:error] += characteristics[:dx]
-      end
-    end
-  end
-
   class Line
-    include BresenhamAlgorithm
+    include Figure
     attr_reader :from, :to
 
     def initialize(from, to)
-      @from, @to = from < to ? [from, to] : [to, from]
-    end
-
-    def ==(other)
-      @from == other.from and @to == other.to
-    end
-
-    def eql?(other)
-      self == other
-    end
-
-    def hash
-      (@from.to_s + @to.to_s).hash
+      @from, @to = [from, to].sort
     end
 
     def draw(canvas)
-      points = bresenham @from, @to
+      points = BresenhamAlgorithm.new(@from, @to).rasterize_on
       points.map { |point| canvas.set_pixel point.x, point.y }
+    end
+
+    class BresenhamAlgorithm
+      def initialize(from, to)
+        @from = from
+        @to = to
+      end
+
+      def slope?
+        (@from.y - @to.y).abs > (@from.x - @to.x).abs
+      end
+
+      def rasterize_on
+        @drawing_from, @drawing_to = adjust_points
+        set_characteristics
+        compute_points
+      end
+
+      def adjust_points
+        if slope?
+          [
+            Point.new(@from.y, @from.x),
+            Point.new(@to.y, @to.x)
+          ]
+        else
+          [ @from, @to ]
+        end
+      end
+
+      def error_delta
+        @delta_x = @drawing_to.x - @drawing_from.x
+        @delta_y = (@drawing_from.y - @drawing_to.y).abs
+
+        @error = (@delta_x / 2).to_i
+      end
+
+      def set_characteristics
+        error_delta
+        @y_step = @drawing_from.y < @drawing_to.y ? 1 : -1
+        @y = @drawing_from.y
+      end
+
+      def compute_points
+        points = []
+
+        @drawing_from.x.upto(@drawing_to.x) do |x|
+          slope? ? points << Point.new(@y, x) : points << Point.new(x, @y)
+          compute_error
+        end
+
+        points
+      end
+
+      def compute_error
+        @error -= @delta_y
+
+        if @error <= 0
+          @y += @y_step
+          @error += @delta_x
+        end
+      end
     end
   end
 
   class Rectangle
+    include Figure
+
     attr_reader :left, :right
+    attr_reader :top_left, :top_right, :bottom_left, :bottom_right
 
     def initialize(left, right)
-      @left, @right = left < right ? [left, right] : [right, left]
-    end
+      @left, @right = [left, right].sort
 
-    def top_left
-      if @left.y > @right.y
-        Point.new @left.x, @right.y
-      else
-        @left
-      end
-    end
-
-    def top_right
-      if @left.y < @right.y
-        Point.new @right.x, @left.y
-      else
-        @right
-      end
-    end
-
-    def bottom_left
-      if @left.y < @right.y
-        Point.new @left.x, @right.y
-      else
-        @left
-      end
-    end
-
-    def bottom_right
-      if @left.y > @right.y
-        Point.new @right.x, @left.y
-      else
-        @right
-      end
-    end
-
-    def ==(other)
-      get_points.sort == (other.send :get_points).sort
-    end
-
-    def eql?(other)
-      self == other
-    end
-
-    def hash
-      (@left.to_s + @right.to_s).hash
+      @top_left = Point.new left.x, [left.y, right.y].min
+      @bottom_left = Point.new left.x, [left.y, right.y].max
+      @top_right = Point.new right.x, [left.y, right.y].min
+      @bottom_right = Point.new right.x, [left.y, right.y].max
     end
 
     def draw(canvas)
-      sides = get_sides
-      sides.map { |line| canvas.draw line }
+      sides.each { |side| side.draw(canvas) }
     end
 
     private
 
-    def get_points
-      [] << top_right << top_left << bottom_right << bottom_left
+    def sides
+      [
+        Line.new(@top_left, @top_right),
+        Line.new(@bottom_left, @bottom_right),
+        Line.new(@top_left, @bottom_left),
+        Line.new(@top_right, @bottom_right),
+      ]
+    end
+  end
+
+  class Canvas
+    attr_reader :width, :height
+
+    def initialize(width, height)
+      @width = width
+      @height = height
+      @canvas = {}
     end
 
-    def get_sides
-      sides = []
+    def set_pixel(width, height)
+      @canvas[[width, height]] = true
+    end
 
-      sides << Line.new(top_left, top_right)
-      sides << Line.new(bottom_left, bottom_right)
-      sides << Line.new(top_left, bottom_left)
-      sides << Line.new(top_right, bottom_right)
+    def pixel_at?(width, height)
+      @canvas[[width, height]]
+    end
 
-      sides
+    def draw(figure)
+      figure.draw(self)
+    end
+
+    def render_as(renderer)
+      renderer.new(self).visualize
+    end
+  end
+
+  module Renderers
+    class BasicRenderer
+      attr_reader :canvas
+
+      def initialize(canvas)
+        @canvas = canvas
+      end
+
+      def visualize
+        raise NotImplementedError
+      end
+    end
+
+    class Ascii < BasicRenderer
+      def visualize
+        pixels = 0.upto(canvas.height.pred).map do |y|
+          0.upto(canvas.width.pred).map { |x| pixel_at(x, y) }
+        end
+
+        join_lines pixels.map { |line| join_pixels_in line }
+      end
+
+      private
+
+      def full_pixel
+        '@'
+      end
+
+      def blank_pixel
+        '-'
+      end
+
+      def pixel_at(x, y)
+        canvas.pixel_at?(x, y) ? full_pixel : blank_pixel
+      end
+
+      def join_pixels_in(line)
+        line.join('')
+      end
+
+      def join_lines(lines)
+        lines.join("\n")
+      end
+    end
+
+    class Html < Ascii
+      TEMPLATE = '<!DOCTYPE html>
+        <html>
+        <head>
+          <title>Rendered Canvas</title>
+          <style type="text/css">
+            .canvas {
+              font-size: 1px;
+              line-height: 1px;
+            }
+            .canvas * {
+              display: inline-block;
+              width: 10px;
+              height: 10px;
+              border-radius: 5px;
+            }
+            .canvas i {
+              background-color: #eee;
+            }
+            .canvas b {
+              background-color: #333;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="canvas">
+            %s
+          </div>
+        </body>
+        </html>
+      '.freeze
+
+      def visualize
+        TEMPLATE % super
+      end
+
+      private
+
+      def full_pixel
+        '<b></b>'
+      end
+
+      def blank_pixel
+        '<i></i>'
+      end
+
+      def join_lines(lines)
+        lines.join('<br>')
+      end
     end
   end
 end
-
-module Graphics
-  canvas = Canvas.new 30, 30
-
-  # Door frame and window
-  canvas.draw Rectangle.new(Point.new(3, 3), Point.new(18, 12))
-  canvas.draw Rectangle.new(Point.new(1, 1), Point.new(20, 28))
-
-  # Door knob
-  canvas.draw Line.new(Point.new(4, 15), Point.new(7, 15))
-  canvas.draw Point.new(4, 16)
-
-  # Big "R"
-  canvas.draw Line.new(Point.new(8, 5), Point.new(8, 10))
-  canvas.draw Line.new(Point.new(9, 5), Point.new(12, 5))
-  canvas.draw Line.new(Point.new(9, 7), Point.new(12, 7))
-  canvas.draw Point.new(13, 6)
-  canvas.draw Line.new(Point.new(12, 8), Point.new(13, 10))
-
-  puts canvas.render_as(Renderers::Ascii)
-  puts canvas.render_as(Renderers::Html)
-
-=begin
-  ascii_text = canvas.render_as(Renderers::Ascii)
-  html_text = canvas.render_as(Renderers::Html)
-
-  File.open("E:/FMI/Ruby/Ruby 2.1/ascii.txt", 'w') do |f|
-    f.write ascii_text
-  end
-
-  File.open("E:/FMI/Ruby/Ruby 2.1/door.html", 'w') do |f|
-    f.write html_text
-  end=end
-
-end
-
-canvas = Graphics::Canvas.new 5, 5
-
-canvas.set_pixel 0, 0
-canvas.set_pixel 1, 1
-canvas.set_pixel 2, 2
-
-puts canvas.render_as(Graphics::Renderers::Ascii)
-puts canvas.render_as(Graphics::Renderers::Html)

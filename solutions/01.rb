@@ -1,81 +1,40 @@
-# http://fmi.ruby.bg/tasks/1/solutions/47
-
 class Integer
   def prime?
-    return false if self < 0
-
-    2.upto(self - 1).all? { |divisor| remainder(divisor).nonzero? }
+    return false if self < 2
+    (2..pred).all? { |divisor| remainder(divisor).nonzero? }
   end
 
   def prime_factors
-    factors = []
-    number = self
-
-    2.upto(self.abs) do |factor|
-      while (number % factor).zero? and factor.prime?
-        factors << factor and number /= factor
-      end
-    end
-
-    factors
+    return [] if self == 1
+    factor = (2..abs).find { |x| remainder(x).zero? }
+    [factor] + (abs / factor).prime_factors
   end
 
   def harmonic
-    harmonic_number = Rational(1, 1)
-
-    2.upto(self.abs) do |number|
-      harmonic_number += Rational(1, number)
-    end
-
-    harmonic_number
+    (1..self).map { |number| Rational(1, number) }.reduce(:+)
   end
 
   def digits
-    number = self.abs.to_s
-    digits_list = []
-
-    number.each_char { |i| digits_list << i.to_i }
-
-    digits_list
+    abs.to_s.chars.map(&:to_i)
   end
 end
 
 class Array
   def frequencies
-    result = {}
-
-    self.each do |key|
-      if result.has_key?(key)
-        result[key] += 1
-      else
-        result[key] = 1
-      end
+    each_with_object Hash.new(0) do |value, frequency|
+      frequency[value] += 1
     end
-
-    result
   end
 
   def average
-    average_sum = 0.0
-
-    self.each do |number|
-      average_sum += number
-    end
-
-    average_sum / self.length
+    reduce(:+) / length.to_f
   end
 
   def drop_every(n)
-    result = []
-
-    self.each_with_index do |element, index|
-      result << element unless index % n == n - 1
-    end
-
-    result
+    select.each_with_index { |_, index| index % n != n - 1 }
   end
 
   def combine_with(other)
-    self.zip(other).flatten.compact
+    empty? ? other : zip(other).flatten.compact
   end
 end
